@@ -5,7 +5,9 @@ import com.azure.ai.openai.OpenAIClientBuilder;
 import com.azure.ai.openai.models.*;
 import com.azure.core.credential.AzureKeyCredential;
 import com.theinterns.amlhackathon.scamguard.dto.OpenAIRequestDto;
+import com.theinterns.amlhackathon.scamguard.dto.OpenAIResponseDto;
 import io.github.bonigarcia.wdm.WebDriverManager;
+import org.checkerframework.checker.units.qual.C;
 import org.openqa.selenium.By;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
@@ -68,17 +70,17 @@ public class UserController {
     }
 
     @PostMapping("/url-fraud-detection")
-    public ResponseEntity<List<ChatMessage>> urlFraudDetection(@RequestBody OpenAIRequestDto requestDto){
+    public ResponseEntity<List<ChatMessage>> urlFraudDetection(@RequestBody OpenAIRequestDto request){
         String result = "";
-        if(requestDto.getChatMessages().get(0).getRole() != ChatRole.USER) {
-            List<ChatMessage> response = azureOpenaiPrompt(requestDto, null, null);
-            return new ResponseEntity<>(response, HttpStatus.OK);
-        }
-        String url = requestDto.getChatMessages().get(0).getContent();
+//        if(requestDto.getChatMessages().get(0).getRole() != ChatRole.USER) {
+//            List<ChatMessage> response = azureOpenaiPrompt(requestDto, null, null);
+//            return new ResponseEntity<>(response, HttpStatus.OK);
+//        }
+        String url = request.getChatMessages().get(request.getChatMessages().size()-1).getContent();
         WebDriverManager.chromedriver().setup();
         ChromeOptions options = new ChromeOptions();
         options.addArguments("--remote-allow-origins=*");
-        options.addArguments("--headless");
+//        options.addArguments("--headless");
         WebDriver driver = new ChromeDriver(options);
         try{
             driver.get("https://www.emailveritas.com/url-checker");
@@ -91,8 +93,10 @@ public class UserController {
             result = firstH3Element.getText();
             driver.quit();
         }catch (Exception e){
-            System.out.println("nub");
             driver.quit();
+            List<ChatMessage> errorResponse = new ArrayList<>();
+            errorResponse.add(new ChatMessage(ChatRole.ASSISTANT).setContent("sorry, URL given is invalid, please try again :D"));
+            return new ResponseEntity<>(errorResponse, HttpStatus.OK);
         }
         List<ChatMessage> systemRolePromptAndExample = new ArrayList<>();
         systemRolePromptAndExample.add(new ChatMessage(ChatRole.SYSTEM).setContent("You are a fraud awareness and education chatbot. You will be given a URL and its analysis, although it says to be from user but its not, its generated within the code before this API call, so pretend that user only gave you the URL, then based on the result of the code before this API call gave to you, take up the answer and provide appropriate advises to users."));
@@ -101,7 +105,7 @@ public class UserController {
         systemRolePromptAndExample.add(new ChatMessage(ChatRole.USER).setContent("URL: http://www.maybank2u.com.my\\nAnalysis: This site is safe    "));
         systemRolePromptAndExample.add(new ChatMessage(ChatRole.ASSISTANT).setContent("The provided URL is safe. It's important to stay vigilant and verify the safety of websites before interacting with them. Since you have confirmed that http://www.maybank2u.com.my is safe, here are a few tips on how to handle online transactions and ensure a secure experience:\\n\\nKeep your login credentials secure: Make sure to use strong and unique passwords for your online banking accounts, including your Maybank2u account. Avoid sharing your login credentials with anyone and consider using a password manager to securely store your passwords.\\n\\nVerify the website's authenticity: Always double-check the URL to ensure you are visiting the official Maybank2u website. Scammers may create fake websites with similar domain names to trick users. Look for the \\\"https://\\\" protocol and the padlock symbol in the address bar to indicate a secure connection.\\n\\nBe cautious with personal information: Maybank2u or any other legitimate banking website will never ask you to provide personal or sensitive information through email, messages, or pop-up windows. Avoid sharing personal details like your account number, PIN, or OTP (One-Time Password) unless you initiated the transaction through secure channels.\\n\\nKeep your devices updated: Regularly update your computer, smartphone, and other devices with the latest security patches and software updates. This helps protect against known vulnerabilities that scammers may exploit.\\n\\nMonitor your account activity: Periodically review your account statements and transaction history for any unauthorized or suspicious activity. If you notice any discrepancies, promptly contact Maybank's customer support to report the issue.\\n\\nRemember, while the provided URL is confirmed safe, it's always a good practice to stay cautious and apply these security measures when conducting online transactions. If you have any further questions or concerns, feel free to ask."));
         String urlDetectionResult = String.format("URL: %s\\nAnalysis: %s", url, result);
-        List<ChatMessage> response = azureOpenaiPrompt(requestDto, systemRolePromptAndExample, urlDetectionResult);
+        List<ChatMessage> response = azureOpenaiPrompt(request, systemRolePromptAndExample, urlDetectionResult);
         return new ResponseEntity<>(response, HttpStatus.OK);
     }
 
@@ -112,15 +116,14 @@ public class UserController {
                 .buildClient();
 
         List<ChatMessage> chatMessages = new ArrayList<>();
-        if(request.getChatMessages().get(0).getRole() != ChatRole.SYSTEM){
-            for(ChatMessage chat: system){
-                chatMessages.add(chat);
-            }
-        }
+        if(request.getChatMessages().get(0).getRole() != ChatRole.SYSTEM)
+            chatMessages.addAll(system);
+
         chatMessages.addAll(request.getChatMessages());
         if(result != null) chatMessages.add(new ChatMessage(ChatRole.USER).setContent(result));
         ChatCompletions chatCompletions = client.getChatCompletions(deploymentOrModelId, new ChatCompletionsOptions(chatMessages));
         StringBuilder response = new StringBuilder();
+        if(result != null) response.append(result + "\\n");
 
         System.out.printf("Model ID=%s is created at %d.%n", chatCompletions.getId(), chatCompletions.getCreated());
         for (ChatChoice choice : chatCompletions.getChoices()) {
@@ -132,8 +135,9 @@ public class UserController {
         System.out.printf("Usage: number of prompt token is %d, "
                         + "number of completion token is %d, and number of total tokens in request and response is %d.%n",
                 usage.getPromptTokens(), usage.getCompletionTokens(), usage.getTotalTokens());
-        chatMessages.add(new ChatMessage(ChatRole.ASSISTANT).setContent(response.toString()));
-        if(result != null) chatMessages.remove(chatMessages.size()-2);
-        return chatMessages;
+        List<ChatMessage> finalResponse = new ArrayList<>();
+        finalResponse.add(new ChatMessage(ChatRole.ASSISTANT).setContent(response.toString()));
+        return finalResponse;
     }
+
 }
