@@ -157,8 +157,7 @@ public class UserController {
                         + "number of completion token is %d, and number of total tokens in request and response is %d.%n",
                 usage.getPromptTokens(), usage.getCompletionTokens(), usage.getTotalTokens());
         List<ChatMessage> finalResponse = new ArrayList<>();
-        String processedResponse = response.toString().replaceAll("\\\\n|\n", "");
-        finalResponse.add(new ChatMessage(ChatRole.ASSISTANT).setContent(processedResponse));
+        finalResponse.add(new ChatMessage(ChatRole.ASSISTANT).setContent(response.toString()));
         return finalResponse;
     }
 
